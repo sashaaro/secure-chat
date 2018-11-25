@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"unsafe"
 )
@@ -10,7 +11,7 @@ import (
 type Packet struct {
 	Version byte
 	MsgType byte
-	Payload [4]byte
+	Payload [10]byte
 }
 
 const packetSize = int(unsafe.Sizeof(Packet{}))
@@ -68,6 +69,9 @@ func (tcp *TCPTransport) receivePacket() chan *Packet {
 			packet := &Packet{}
 
 			err := binary.Read(conn, binary.LittleEndian, packet)
+			if err == io.EOF {
+				return
+			}
 			if err != nil {
 				panic(err)
 			}

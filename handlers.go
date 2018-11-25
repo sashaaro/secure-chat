@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
@@ -60,12 +61,15 @@ func openSession(session *Session, transport Transport)  {
 		MsgType: MsgTypeExchangeKey,
 	}
 
-	copy(startHandshakePacket.Payload[:], buf.Bytes()[:4])
+	copy(startHandshakePacket.Payload[:], buf.Bytes()[:10])
 
 	fmt.Println("Start", startHandshakePacket)
 	transport.sendPacket(session.partner.Address, startHandshakePacket)
 }
 
-func exchangeKey(request [4]byte) {
-
+func exchangeKey(payloadBytes [10]byte) {
+	payload := &PayloadExchange{}
+	buf := new(bytes.Buffer)
+	buf.Write(payloadBytes)
+	err := binary.Read(buf, binary.LittleEndian, payload)
 }

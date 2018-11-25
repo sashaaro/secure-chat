@@ -52,13 +52,7 @@ func (chat *Chat) readyReceiveMessage() chan *Message {
 	go func() {
 		for packet := range chat.transport.receivePacket() {
 			handlePacketV1(packet)
-			channel <- &Message{text: "First packet", from: &Partner{Name: "From transport"}}
 		}
-
-		channel <- &Message{text: "First letters", from: &Partner{Name: "Alex"}}
-		time.Sleep(3 * time.Second)
-		channel <- &Message{text: "Second letters", from: &Partner{Name: "Ivan"}}
-
 		close(channel)
 	}()
 
@@ -75,22 +69,22 @@ func main()  {
 	chanMessages := chat.readyReceiveMessage()
 
 	go func() {
-		for message := range chanMessages {
-			fmt.Printf("%s: %s\n", message.from.Name, message.text)
+		time.Sleep(3 * time.Second)
+
+		chat2 := &Chat{
+			transport: &TCPTransport{
+				port: "8082",
+			},
+			sessions: &[]*Session{},
 		}
+
+		partner := &Partner{Name: "Dmitry", Address: []byte("127.0.0.1:8081")}
+		chat2.sendMessage(partner, "Hi")
 	}()
 
-	time.Sleep(3 * time.Second)
-
-	chat2 := &Chat{
-		transport: &TCPTransport{
-			port: "8082",
-		},
-		sessions: &[]*Session{},
+	for message := range chanMessages {
+		fmt.Printf("%s: %s\n", message.from.Name, message.text)
 	}
-
-	partner := &Partner{Name: "Dmitry", Address: []byte("127.0.0.1:8081")}
-	chat2.sendMessage(partner, "Hi")
 
 	//alice.generateSecret(bob.publicKey)
 	//bob.generateSecret(alice.publicKey)

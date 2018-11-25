@@ -42,7 +42,7 @@ func (chat *Chat) sendMessage(partner *Partner, test string)  {
 
 	if currentSession == nil {
 		currentSession = &Session{partner: partner}
-		openSession(currentSession)
+		openSession(currentSession, chat.transport)
 	}
 }
 
@@ -50,14 +50,14 @@ func (chat *Chat) readyReceiveMessage() chan *Message {
 	channel := make(chan *Message)
 
 	go func() {
-		channel <- &Message{text: "First letters", from: &Partner{Name: "Alex"}}
-		time.Sleep(3 * time.Second)
-		channel <- &Message{text: "Second letters", from: &Partner{Name: "Ivan"}}
-
 		for packet := range chat.transport.receivePacket() {
 			handlePacketV1(packet)
 			channel <- &Message{text: "First packet", from: &Partner{Name: "From transport"}}
 		}
+
+		channel <- &Message{text: "First letters", from: &Partner{Name: "Alex"}}
+		time.Sleep(3 * time.Second)
+		channel <- &Message{text: "Second letters", from: &Partner{Name: "Ivan"}}
 
 		close(channel)
 	}()
@@ -67,17 +67,30 @@ func (chat *Chat) readyReceiveMessage() chan *Message {
 
 func main()  {
 	chat := &Chat{
-		transport: &TCPTransport{},
+		transport: &TCPTransport{
+			port: "8081",
+		},
 		sessions: &[]*Session{},
 	}
 	chanMessages := chat.readyReceiveMessage()
 
-	partner := &Partner{Name: "Dmitry", Address: []byte("192.168.0.5")}
-	chat.sendMessage(partner, "Hi")
+	go func() {
+		for message := range chanMessages {
+			fmt.Printf("%s: %s\n", message.from.Name, message.text)
+		}
+	}()
 
-	for message := range chanMessages {
-		fmt.Printf("%s: %s\n", message.from.Name, message.text)
+	time.Sleep(3 * time.Second)
+
+	chat2 := &Chat{
+		transport: &TCPTransport{
+			port: "8082",
+		},
+		sessions: &[]*Session{},
 	}
+
+	partner := &Partner{Name: "Dmitry", Address: []byte("127.0.0.1:8081")}
+	chat2.sendMessage(partner, "Hi")
 
 	//alice.generateSecret(bob.publicKey)
 	//bob.generateSecret(alice.publicKey)

@@ -30,7 +30,7 @@ type PayloadExchange struct {
 	publicKey [2]byte
 }
 
-func openSession(session *Session)  {
+func openSession(session *Session, transport Transport)  {
 	base, _ := rand.Prime(rand.Reader,16)
 	modulus, _ := rand.Prime(rand.Reader,16)
 
@@ -44,8 +44,6 @@ func openSession(session *Session)  {
 
 	dh.generatePublic()
 
-
-
 	payload := &PayloadExchange{}
 
 	copy(payload.base[:], base.Bytes()[:2])
@@ -53,19 +51,19 @@ func openSession(session *Session)  {
 	copy(payload.publicKey[:], dh.publicKey.Bytes()[:2])
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.LittleEndian, payload)
-
 	if err != nil {
 		panic(err)
 	}
-	startHandshakePacket := &Packet{
-		MsgType: MsgTypeExchangeKey,
+
+	startHandshakePacket := Packet{
 		Version: CurrentVersion,
+		MsgType: MsgTypeExchangeKey,
 	}
 
 	copy(startHandshakePacket.Payload[:], buf.Bytes()[:4])
 
-	fmt.Print(startHandshakePacket)
-	// TODO transport
+	fmt.Println("Start", startHandshakePacket)
+	transport.sendPacket(session.partner.Address, startHandshakePacket)
 }
 
 func exchangeKey(request [4]byte) {

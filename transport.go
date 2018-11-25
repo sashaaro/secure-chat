@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"net"
+	"time"
 	"unsafe"
 )
 
@@ -16,7 +17,7 @@ const packetSize = int(unsafe.Sizeof(Packet{}))
 
 type Transport interface {
 	sendPacket(address []byte, packet Packet)
-	receivePacket() chan <- Packet
+	receivePacket() chan *Packet
 }
 
 
@@ -40,7 +41,7 @@ func (tcp *TCPTransport) sendPacket(address []byte, packet Packet)  {
 	conn.Close()
 }
 
-func (tcp *TCPTransport) receivePacket() chan <- Packet {
+func (tcp *TCPTransport) receivePacket() chan *Packet {
 	if tcp.listener == nil {
 		listener, err := net.Listen("tcp", ":8081")
 		if err != nil {
@@ -50,7 +51,13 @@ func (tcp *TCPTransport) receivePacket() chan <- Packet {
 		tcp.listener = &listener
 	}
 
-	tcp.listener.Accept()
+	var channel = make(chan *Packet)
+	// tcp.listener.Accept()
 
+	go func() {
+		time.Sleep(4 * time.Second)
+		channel <- &Packet{}
+	}()
 
+	return channel
 }

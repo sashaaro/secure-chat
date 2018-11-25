@@ -26,36 +26,39 @@ type Session struct {
 	meta *[]byte
 }
 
-func (session *Session) open()  {
-
-}
-
 type Chat struct {
 	sessions *[]*Session
+	transport Transport
 }
 
 func (chat *Chat) sendMessage(partner *Partner, test string)  {
-	var openSession *Session
+	var currentSession *Session
 	for _, session := range *chat.sessions {
 		if session.partner == partner {
-			openSession = session
+			currentSession = session
 			break
 		}
 	}
 
-	if openSession != nil {
-		openSession = &Session{partner: partner}
-		openSession.open()
+	if currentSession == nil {
+		currentSession = &Session{partner: partner}
+		openSession(currentSession)
 	}
 }
 
-func (chat *Chat) readyReceiveMessage() chan <- *Message {
-	channel := make(chan <- *Message)
+func (chat *Chat) readyReceiveMessage() chan *Message {
+	channel := make(chan *Message)
 
 	go func() {
 		channel <- &Message{text: "First letters", from: &Partner{Name: "Alex"}}
-		<- time.After(3 * time.Second)
+		time.Sleep(3 * time.Second)
 		channel <- &Message{text: "Second letters", from: &Partner{Name: "Ivan"}}
+
+		for packet := range chat.transport.receivePacket() {
+			handlePacketV1(packet)
+			channel <- &Message{text: "First packet", from: &Partner{Name: "From transport"}}
+		}
+
 		close(channel)
 	}()
 
@@ -63,8 +66,14 @@ func (chat *Chat) readyReceiveMessage() chan <- *Message {
 }
 
 func main()  {
-	chat := &Chat{}
+	chat := &Chat{
+		transport: &TCPTransport{},
+		sessions: &[]*Session{},
+	}
 	chanMessages := chat.readyReceiveMessage()
+
+	partner := &Partner{Name: "Dmitry", Address: []byte("192.168.0.5")}
+	chat.sendMessage(partner, "Hi")
 
 	for message := range chanMessages {
 		fmt.Printf("%s: %s\n", message.from.Name, message.text)

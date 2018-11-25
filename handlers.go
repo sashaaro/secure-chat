@@ -1,25 +1,36 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"log"
 )
 
 const MsgTypeExchangeKey = 1
 
-func handlePacketV1(packet Packet) (error)  {
-	if packet.Version > 1 {
-		return fmt.Errorf("Unsupported version. Only v1")
+const CurrentVersion = 1
+
+func handlePacketV1(packet *Packet) (error)  {
+	if packet.Version > CurrentVersion {
+		return fmt.Errorf(fmt.Sprintf("Unsupported version. Only v%v", CurrentVersion))
 	}
 
 	switch packet.MsgType {
 	case MsgTypeExchangeKey:
 		exchangeKey(packet.Payload)
 	}
+
+	return nil
 }
 
-func startExcahnge(session *Session)  {
+type PayloadExchange struct {
+	base [2]byte
+	modulus [2]byte
+	publicKey [2]byte
+}
+
+func openSession(session *Session)  {
 	base, _ := rand.Prime(rand.Reader,16)
 	modulus, _ := rand.Prime(rand.Reader,16)
 
@@ -27,12 +38,34 @@ func startExcahnge(session *Session)  {
 
 	dh := &DHClient{
 		privateKey:	alicePrivateKey,
-		modulus: modulus,
 		base: base,
+		modulus: modulus,
 	}
 
 	dh.generatePublic()
 
+
+
+	payload := &PayloadExchange{}
+
+	copy(payload.base[:], base.Bytes()[:2])
+	copy(payload.modulus[:], modulus.Bytes()[:2])
+	copy(payload.publicKey[:], dh.publicKey.Bytes()[:2])
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, payload)
+
+	if err != nil {
+		panic(err)
+	}
+	startHandshakePacket := &Packet{
+		MsgType: MsgTypeExchangeKey,
+		Version: CurrentVersion,
+	}
+
+	copy(startHandshakePacket.Payload[:], buf.Bytes()[:4])
+
+	fmt.Print(startHandshakePacket)
+	// TODO transport
 }
 
 func exchangeKey(request [4]byte) {

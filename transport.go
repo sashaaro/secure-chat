@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"unsafe"
 )
 
 type Packet struct {
@@ -14,7 +13,6 @@ type Packet struct {
 	Payload [10]byte
 }
 
-const packetSize = int(unsafe.Sizeof(Packet{}))
 
 type Transport interface {
 	sendPacket(address []byte, packet Packet)
@@ -40,7 +38,7 @@ func (tcp *TCPTransport) sendPacket(address []byte, packet Packet)  {
 	if e != nil {
 		panic(e)
 	}
-	conn.Close()
+	defer conn.Close()
 }
 
 func (tcp *TCPTransport) receivePacket() chan *Packet {
@@ -76,8 +74,8 @@ func (tcp *TCPTransport) receivePacket() chan *Packet {
 				panic(err)
 			}
 
-			// output message received
-			// fmt.Println("Receive", packet)
+
+			fmt.Printf("Receive packet %v\n", packet.MsgType)
 
 			channel <- packet
 		}

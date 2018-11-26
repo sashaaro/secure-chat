@@ -77,9 +77,9 @@ func (tcp *TCPTransport) receivePacket() chan *Packet {
 			}
 
 			// output message received
-			fmt.Println("Receive", packet)
+			// fmt.Println("Receive", packet)
 
-			// channel <- packet
+			channel <- packet
 		}
 	}()
 

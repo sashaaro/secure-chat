@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
@@ -17,6 +16,7 @@ func handlePacketV1(packet *Packet) (error)  {
 		return fmt.Errorf(fmt.Sprintf("Unsupported version. Only v%v", CurrentVersion))
 	}
 
+	fmt.Print(packet.MsgType)
 	switch packet.MsgType {
 	case MsgTypeExchangeKey:
 		exchangeKey(packet.Payload)
@@ -26,9 +26,9 @@ func handlePacketV1(packet *Packet) (error)  {
 }
 
 type PayloadExchange struct {
-	base [2]byte
-	modulus [2]byte
-	publicKey [2]byte
+	Base [2]byte
+	Modulus [2]byte
+	PublicKey [2]byte
 }
 
 func openSession(session *Session, transport Transport)  {
@@ -47,9 +47,9 @@ func openSession(session *Session, transport Transport)  {
 
 	payload := &PayloadExchange{}
 
-	copy(payload.base[:], base.Bytes()[:2])
-	copy(payload.modulus[:], modulus.Bytes()[:2])
-	copy(payload.publicKey[:], dh.publicKey.Bytes()[:2])
+	copy(payload.Base[:], base.Bytes()[:2])
+	copy(payload.Modulus[:], modulus.Bytes()[:2])
+	copy(payload.PublicKey[:], dh.publicKey.Bytes()[:2])
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.LittleEndian, payload)
 	if err != nil {
@@ -68,8 +68,19 @@ func openSession(session *Session, transport Transport)  {
 }
 
 func exchangeKey(payloadBytes [10]byte) {
-	payload := &PayloadExchange{}
-	buf := new(bytes.Buffer)
-	buf.Write(payloadBytes)
-	err := binary.Read(buf, binary.LittleEndian, payload)
+	payloadExchange := &PayloadExchange{}
+	var payload []byte
+
+	err := binary.Read(bytes.NewReader(payloadBytes[:10]), binary.LittleEndian, payloadExchange)
+	fmt.Print(payload)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Print(payloadExchange.Modulus)
+	fmt.Print(payloadExchange.Base)
+
+	// TODO session.DH.modulus = payloadExchange.Modulus
+	// TODO session.DH.base = payloadExchange.Base
 }

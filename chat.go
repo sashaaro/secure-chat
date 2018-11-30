@@ -25,6 +25,10 @@ type Message struct {
 
 type Session struct {
 	partner *Partner
+
+	modulus [2]byte // TODO remove
+	base [2]byte // TODO remove
+	publickey [2]byte // TODO remove
 	// meta *[]byte
 }
 
@@ -50,7 +54,7 @@ func (chat *TransportChat) sendMessage(partner *Partner, test string)  {
 
 	if currentSession == nil {
 		currentSession = &Session{partner: partner}
-		// chat.openSession(currentSession)
+		chat.openSession(currentSession)
 		sessions := append(*chat.sessions, currentSession)
 		chat.sessions = &sessions
 	}
@@ -141,6 +145,10 @@ func (chat *TransportChat) openSession(session *Session)  {
 	chat.transport.sendPacket(session.partner.Address, startHandshakePacket)
 }
 
+func (chat *TransportChat) sendKey()  {
+
+}
+
 func (chat *TransportChat) handlePacket(packet *Packet) (*Message, error)  {
 	if packet.Version > CurrentVersion {
 		return nil, fmt.Errorf(fmt.Sprintf("Unsupported version. Only v%v", CurrentVersion))
@@ -169,8 +177,17 @@ func (chat *TransportChat) exchangeKey(payloadBytes [10]byte) {
 		panic(err)
 	}
 
-	// TODO session.DH.modulus = payloadExchange.Modulus
-	// TODO session.DH.base = payloadExchange.Base
+	session := (*chat.sessions)[0] // TODO resolve sender
+
+	session.modulus = payloadExchange.Modulus
+	session.base = payloadExchange.Base
+	session.publickey = payloadExchange.PublicKey
+
+	dh := &DiffieHellman{}
+	dh.base.SetBytes(session.base[:])
+	dh.modulus.SetBytes(session.modulus[:])
+	dh.generatePrivateKey(16)
+	dh.generatePublic()
 }
 
 func (chat *TransportChat) receiveMessage(payloadBytes [10]byte) *Message {
@@ -192,79 +209,40 @@ func (chat *TransportChat) receiveMessage(payloadBytes [10]byte) *Message {
 }
 
 func main()  {
-	chat := &TransportChat{
+	alice := &Partner{Name: "Alice", Address: []byte("127.0.0.1:8781")}
+	bob := &Partner{Name: "Bob", Address: []byte("127.0.0.1:8782")}
+
+	aliceChat := &TransportChat{
 		transport: &TCPTransport{
-			port: "8081",
+			port: "8781",
+		},
+		sessions: &[]*Session{},
+	}
+	bobChat := &TransportChat{
+		transport: &TCPTransport{
+			port: "8782",
 		},
 		sessions: &[]*Session{},
 	}
 
 	go func() {
-
-		chat2 := &TransportChat{
-			transport: &TCPTransport{
-				port: "8082",
-			},
-			sessions: &[]*Session{},
+		bobMessages := bobChat.readyReceiveMessage()
+		for message := range bobMessages {
+			fmt.Printf("Message for Bob -> %s: %s\n", message.from.Name, message.text)
 		}
-
-		chanMessages2 := chat2.readyReceiveMessage()
-		for message := range chanMessages2 {
-			fmt.Printf("%s: %s\n", message.from.Name, message.text)
-		}
-
-		time.Sleep(3 * time.Second)
-		
-		partner := &Partner{Name: "Dmitry", Address: []byte("127.0.0.1:8081")}
-		chat2.sendMessage(partner, "Hi")
-
-		partner2 := &Partner{Name: "Max", Address: []byte("127.0.0.1:8082")}
-		chat.sendMessage(partner2, "Max")
 	}()
 
-	chanMessages := chat.readyReceiveMessage()
-	for message := range chanMessages {
-		fmt.Printf("%s: %s\n", message.from.Name, message.text)
+	go func() {
+		time.Sleep(3 * time.Second)
+		bobChat.sendMessage(alice, "Hi Alice!")
+		time.Sleep(1 * time.Second)
+		aliceChat.sendMessage(bob, "Hi bob.")
+	}()
+
+	aliceMessages := aliceChat.readyReceiveMessage()
+	for message := range aliceMessages {
+		fmt.Printf("Message fro Alice -> %s: %s\n", message.from.Name, message.text)
 	}
-
-	//alice.generateSecret(bob.publicKey)
-	//bob.generateSecret(alice.publicKey)
-
-	//fmt.Println("Alice secret", alice.secret)
-	//fmt.Println("Bob secret", bob.secret)
-
-
-	/*h := sha256.New()
-	h.Write(alice.secret.Bytes())
-	// aesKey := alice.secret.Bytes()
-	aesKey := h.Sum(nil)
-
-	var plaintext = "Hello!!!!11 jlfkdslf lksdjf jdsklfj lsdjflk dslfjldasjflk dsjlkfj dksljflksdaj flkjsadlk fjlksajdf kljsdaljf ds" +
-		"sdkfljsdalkjf lksdjflk jsdlkfj lksdjflk sdjkflj ldsjflsjdflk jalkfjaekwljr ;lewkf;ldks ;flkadls;kf; ldskf;lsdakf " +
-		"sdf sdaf;s adfkjdksljflksajdflkdsjfoidajsfpewiurpoewkjf;ladjsf;lk slf;smv,.mcx.vmv;sadmvc"
-
-
-	ciphertext, err := encrypt([]byte(plaintext), aesKey)
-	if err != nil {
-	}
-	fmt.Printf("%s => %x\n", plaintext, ciphertext)
-
-	decrypted, err := decrypt(ciphertext, aesKey)
-	if err != nil {
-	}
-	fmt.Printf("%x => %s\n", ciphertext, decrypted)
-
-	packet := Packet{}
-
-	data := make([]byte, size)
-	copy(data, []byte{0x01, 0x01, 0x00, 0x01, 0x02})
-
-	e := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet)
-	if e != nil {
-		panic(e)
-	}
-
-	fmt.Print(packet.MsgType)*/
 }
 
 

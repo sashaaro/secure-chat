@@ -13,10 +13,15 @@ type Packet struct {
 	Payload [10]byte
 }
 
+type PacketWithAddress struct {
+	address []byte
+
+	Packet
+}
 
 type Transport interface {
 	sendPacket(address []byte, packet Packet)
-	receivePacket() chan *Packet
+	receivePacket() chan *PacketWithAddress
 }
 
 
@@ -33,6 +38,8 @@ func (tcp *TCPTransport) sendPacket(address []byte, packet Packet)  {
 		panic(err)
 	}
 
+	fmt.Printf("Send packet msg type %v. Address %v \n", packet.MsgType, address)
+
 	tcp.conn = &conn
 	e := binary.Write(conn, binary.LittleEndian, packet)
 	if e != nil {
@@ -41,7 +48,7 @@ func (tcp *TCPTransport) sendPacket(address []byte, packet Packet)  {
 	defer conn.Close()
 }
 
-func (tcp *TCPTransport) receivePacket() chan *Packet {
+func (tcp *TCPTransport) receivePacket() chan *PacketWithAddress {
 	if tcp.listener == nil {
 		listener, err := net.Listen("tcp", fmt.Sprintf(":%v", tcp.port))
 		if err != nil {
@@ -51,19 +58,14 @@ func (tcp *TCPTransport) receivePacket() chan *Packet {
 		tcp.listener = listener
 	}
 
-	var channel = make(chan *Packet)
+	var channel = make(chan *PacketWithAddress)
 	conn, err := tcp.listener.Accept()
 	if err != nil {
 		panic(err)
 	}
 
 	go func() {
-		// time.Sleep(4 * time.Second)
-		// channel <- &Packet{}
-
 		for {
-			// will listen for message to process ending in newline (\n)
-			// packetBytes, _ := ioutil.ReadAll(conn)
 			packet := &Packet{}
 
 			err := binary.Read(conn, binary.LittleEndian, packet)
@@ -74,10 +76,13 @@ func (tcp *TCPTransport) receivePacket() chan *Packet {
 				panic(err)
 			}
 
+			// fmt.Printf("Receive packet %v\n", packet.MsgType)
 
-			fmt.Printf("Receive packet %v\n", packet.MsgType)
+			packetWithAddress := &PacketWithAddress{}
+			packetWithAddress.Packet = *packet
+			packetWithAddress.address = []byte(conn.LocalAddr().String())
 
-			channel <- packet
+			channel <- packetWithAddress
 		}
 	}()
 

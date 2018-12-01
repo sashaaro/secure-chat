@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"time"
+	"math/big"
 )
 
 
@@ -26,37 +27,39 @@ type Message struct {
 type Session struct {
 	partner *Partner
 
-	modulus [2]byte // TODO remove
-	base [2]byte // TODO remove
+	dh *DiffieHellman // TODO remove
 	publickey [2]byte // TODO remove
 	// meta *[]byte
 }
 
 
-type Chat interface {
+type IChat interface {
 	readyReceiveMessage() chan *Message
 	sendMessage(message *Message)
 }
 
-type TransportChat struct {
-	sessions *[]*Session
+type Chat struct {
+	sessions []*Session
 	transport Transport
 }
 
-func (chat *TransportChat) sendMessage(partner *Partner, test string)  {
+func (chat *Chat) sendMessage(partner *Partner, test string)  {
 	var currentSession *Session
-	for _, session := range *chat.sessions {
+
+	if len(chat.sessions) > 0 { // TODO
+		currentSession = chat.sessions[0]
+	}
+	/*for _, session := range chat.sessions {
 		if session.partner == partner {
 			currentSession = session
 			break
 		}
-	}
+	}*/
 
 	if currentSession == nil {
 		currentSession = &Session{partner: partner}
 		chat.openSession(currentSession)
-		sessions := append(*chat.sessions, currentSession)
-		chat.sessions = &sessions
+		// time.Sleep(5 * time.Second)
 	}
 
 	plaintext := []byte(test)
@@ -71,14 +74,13 @@ func (chat *TransportChat) sendMessage(partner *Partner, test string)  {
 
 	payloadBytes := payload.Bytes()
 
-	packet := &Packet{MsgType:MsgTypeMessage, Version: CurrentVersion}
+	packet := Packet{MsgType: MsgTypeMessage, Version: CurrentVersion}
 	copy(packet.Payload[:10], payloadBytes)
 
-	fmt.Printf("Send message packet\n")
-	chat.transport.sendPacket(partner.Address, *packet)
+	chat.transport.sendPacket(partner.Address, packet)
 }
 
-func (chat *TransportChat) readyReceiveMessage() chan *Message {
+func (chat *Chat) readyReceiveMessage() chan *Message {
 	channel := make(chan *Message)
 
 	go func() {
@@ -115,16 +117,22 @@ type PayloadMessage struct {
 	// from
 }
 
-func (chat *TransportChat) openSession(session *Session)  {
-
+func (chat *Chat) openSession(session *Session)  {
 	dh := &DiffieHellman{}
-
 	dh.generateParams(16)
 	dh.generatePrivateKey(16)
 	dh.generatePublic()
 
+	chat.sessions = append(chat.sessions, session)
+	session.dh = dh
+
+	chat.sendKey(session)
+}
+
+func (chat *Chat) sendKey(session *Session)  {
 	payload := &PayloadExchange{}
 
+	dh := session.dh
 	copy(payload.Base[:], dh.base.Bytes()[:2])
 	copy(payload.Modulus[:], dh.modulus.Bytes()[:2])
 	copy(payload.PublicKey[:], dh.publicKey.Bytes()[:2])
@@ -138,26 +146,19 @@ func (chat *TransportChat) openSession(session *Session)  {
 		Version: CurrentVersion,
 		MsgType: MsgTypeExchangeKey,
 	}
-
 	copy(startHandshakePacket.Payload[:], buf.Bytes()[:10])
-
-	fmt.Printf("Open session\n")
 	chat.transport.sendPacket(session.partner.Address, startHandshakePacket)
 }
 
-func (chat *TransportChat) sendKey()  {
-
-}
-
-func (chat *TransportChat) handlePacket(packet *Packet) (*Message, error)  {
+func (chat *Chat) handlePacket(packet *PacketWithAddress) (*Message, error)  {
 	if packet.Version > CurrentVersion {
 		return nil, fmt.Errorf(fmt.Sprintf("Unsupported version. Only v%v", CurrentVersion))
 	}
 
-	fmt.Printf("Receive packet msg type %v\n", packet.MsgType)
+	fmt.Printf("Receive packet msg type %v. Address %v \n", packet.MsgType, string(packet.address))
 	switch packet.MsgType {
 	case MsgTypeExchangeKey:
-		chat.exchangeKey(packet.Payload)
+		chat.exchangeKey(packet.Payload, packet.address)
 	case MsgTypeMessage:
 		message := chat.receiveMessage(packet.Payload)
 		return message, nil
@@ -168,7 +169,7 @@ func (chat *TransportChat) handlePacket(packet *Packet) (*Message, error)  {
 }
 
 
-func (chat *TransportChat) exchangeKey(payloadBytes [10]byte) {
+func (chat *Chat) exchangeKey(payloadBytes [10]byte, address []byte) {
 	payloadExchange := &PayloadExchange{}
 
 	err := binary.Read(bytes.NewReader(payloadBytes[:10]), binary.LittleEndian, payloadExchange)
@@ -177,20 +178,34 @@ func (chat *TransportChat) exchangeKey(payloadBytes [10]byte) {
 		panic(err)
 	}
 
-	session := (*chat.sessions)[0] // TODO resolve sender
+	// fmt.Println("%v", len(chat.sessions))
+	if len(chat.sessions) > 0 { // TODO resolve by payload
+		session := chat.sessions[0]
+		session.publickey = payloadExchange.PublicKey
+	} else {
+		session := &Session{}
+		session.publickey = payloadExchange.PublicKey
 
-	session.modulus = payloadExchange.Modulus
-	session.base = payloadExchange.Base
-	session.publickey = payloadExchange.PublicKey
+		partner := &Partner{Address: address} // todo find from list by address
+		session.partner = partner
 
-	dh := &DiffieHellman{}
-	dh.base.SetBytes(session.base[:])
-	dh.modulus.SetBytes(session.modulus[:])
-	dh.generatePrivateKey(16)
-	dh.generatePublic()
+		dh := &DiffieHellman{}
+		session.dh = dh
+
+		dh.base = new(big.Int)
+		dh.modulus = new(big.Int)
+
+		dh.base.SetBytes(payloadExchange.Base[:])
+		dh.modulus.SetBytes(payloadExchange.Modulus[:])
+		dh.generatePrivateKey(16)
+		dh.generatePublic()
+
+		chat.sessions = append(chat.sessions, session)
+		chat.sendKey(session)
+	}
 }
 
-func (chat *TransportChat) receiveMessage(payloadBytes [10]byte) *Message {
+func (chat *Chat) receiveMessage(payloadBytes [10]byte) *Message {
 	payloadMessage := &PayloadMessage{}
 	var payload []byte
 
@@ -212,17 +227,17 @@ func main()  {
 	alice := &Partner{Name: "Alice", Address: []byte("127.0.0.1:8781")}
 	bob := &Partner{Name: "Bob", Address: []byte("127.0.0.1:8782")}
 
-	aliceChat := &TransportChat{
+	aliceChat := &Chat{
 		transport: &TCPTransport{
 			port: "8781",
 		},
-		sessions: &[]*Session{},
+		sessions: []*Session{},
 	}
-	bobChat := &TransportChat{
+	bobChat := &Chat{
 		transport: &TCPTransport{
 			port: "8782",
 		},
-		sessions: &[]*Session{},
+		sessions: []*Session{},
 	}
 
 	go func() {
@@ -233,9 +248,9 @@ func main()  {
 	}()
 
 	go func() {
-		time.Sleep(3 * time.Second)
-		bobChat.sendMessage(alice, "Hi Alice!")
 		time.Sleep(1 * time.Second)
+		bobChat.sendMessage(alice, "Hi Alice!")
+		time.Sleep(2 * time.Second)
 		aliceChat.sendMessage(bob, "Hi bob.")
 	}()
 

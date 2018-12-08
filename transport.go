@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"crypto/tls"
 )
 
 type Packet struct {
@@ -38,8 +39,6 @@ func (tcp *TCPTransport) sendPacket(address []byte, packet Packet)  {
 		panic(err)
 	}
 
-	fmt.Printf("Send packet msg type %v. Address %v \n", packet.MsgType, address)
-
 	tcp.conn = &conn
 	e := binary.Write(conn, binary.LittleEndian, packet)
 	if e != nil {
@@ -59,24 +58,86 @@ func (tcp *TCPTransport) receivePacket() chan *PacketWithAddress {
 	}
 
 	var channel = make(chan *PacketWithAddress)
-	conn, err := tcp.listener.Accept()
-	if err != nil {
-		panic(err)
-	}
-
 	go func() {
 		for {
-			packet := &Packet{}
-
-			err := binary.Read(conn, binary.LittleEndian, packet)
-			if err == io.EOF {
-				return
-			}
+			conn, err := tcp.listener.Accept()
 			if err != nil {
 				panic(err)
 			}
 
-			// fmt.Printf("Receive packet %v\n", packet.MsgType)
+			packet := &Packet{}
+
+			err2 := binary.Read(conn, binary.LittleEndian, packet)
+			if err2 == io.EOF {
+				continue
+			}
+			if err2 != nil {
+				panic(err)
+			}
+
+			packetWithAddress := &PacketWithAddress{}
+			packetWithAddress.Packet = *packet
+			packetWithAddress.address = []byte(conn.LocalAddr().String())
+
+			channel <- packetWithAddress
+		}
+	}()
+
+	return channel
+}
+
+
+
+type TLSTransport struct {
+	port string
+	conn *tls.Conn
+	listener net.Listener
+}
+
+func (transport *TLSTransport) sendPacket(address []byte, packet Packet)  {
+	conn, err := tls.Dial("tcp", string(address), &tls.Config{
+		InsecureSkipVerify: true,
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	transport.conn = conn
+	e := binary.Write(conn, binary.LittleEndian, packet)
+	if e != nil {
+		panic(e)
+	}
+	defer conn.Close()
+}
+
+func (transport *TLSTransport) receivePacket() chan *PacketWithAddress {
+	if transport.listener == nil {
+		cer, err := tls.LoadX509KeyPair("test.cert", "test.key")
+		if err != nil {
+			panic(err)
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cer}}
+		transport.listener, _ = tls.Listen("tcp", fmt.Sprintf(":%v", transport.port), config)
+	}
+
+	var channel = make(chan *PacketWithAddress)
+	go func() {
+		for {
+			conn, err := transport.listener.Accept()
+			if err != nil {
+				panic(err)
+			}
+
+			packet := &Packet{}
+
+			err2 := binary.Read(conn, binary.LittleEndian, packet)
+			if err2 == io.EOF {
+				continue
+			}
+			if err2 != nil {
+				panic(err)
+			}
 
 			packetWithAddress := &PacketWithAddress{}
 			packetWithAddress.Packet = *packet

@@ -2,15 +2,11 @@ package main
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"io"
-	"time"
+				"encoding/binary"
+		"fmt"
+		"time"
 	"math/big"
+	"crypto/sha256"
 )
 
 
@@ -43,7 +39,7 @@ type Chat struct {
 	transport Transport
 }
 
-func (chat *Chat) sendMessage(partner *Partner, test string)  {
+func (chat *Chat) sendMessage(partner *Partner, text string)  {
 	var currentSession *Session
 
 	if len(chat.sessions) > 0 { // TODO
@@ -59,12 +55,19 @@ func (chat *Chat) sendMessage(partner *Partner, test string)  {
 	if currentSession == nil {
 		currentSession = &Session{partner: partner}
 		chat.openSession(currentSession)
-		// time.Sleep(5 * time.Second)
+		time.Sleep(3 * time.Second) // TODO
 	}
 
-	plaintext := []byte(test)
+	plaintext := []byte(text)
 	payloadMessage := PayloadMessage{}
-	copy(payloadMessage.Plaintext[:10], plaintext[:10])
+
+	h := sha256.New()
+	h.Write(currentSession.dh.privateKey.Bytes())
+
+	encryptedMessage, _ := encrypt(plaintext, h.Sum(nil))
+	//copy(payloadMessage.Plaintext[:10], plaintext[:10])
+	copy(payloadMessage.Plaintext[:10], encryptedMessage[:10])
+	//copy(payloadMessage.Plaintext[:10], encryptedMessage[:10])
 
 	payload := new(bytes.Buffer)
 	err := binary.Write(payload, binary.LittleEndian, payloadMessage)
@@ -89,6 +92,21 @@ func (chat *Chat) readyReceiveMessage() chan *Message {
 			if err != nil {
 				panic(err)
 			}
+
+			if message == nil {
+				continue
+			}
+
+			h := sha256.New()
+			h.Write(chat.sessions[0].dh.privateKey.Bytes())
+			fmt.Println(message)
+			decrypted, e := decrypt([]byte(message.text), h.Sum(nil))
+			if e != nil {
+				panic(e)
+			}
+
+			message.text = string(decrypted)
+
 			if message != nil {
 				message.from = &Partner{Name: "anony"} // TODO
 				channel <- message
@@ -155,7 +173,6 @@ func (chat *Chat) handlePacket(packet *PacketWithAddress) (*Message, error)  {
 		return nil, fmt.Errorf(fmt.Sprintf("Unsupported version. Only v%v", CurrentVersion))
 	}
 
-	fmt.Printf("Receive packet msg type %v. Address %v \n", packet.MsgType, string(packet.address))
 	switch packet.MsgType {
 	case MsgTypeExchangeKey:
 		chat.exchangeKey(packet.Payload, packet.address)
@@ -207,10 +224,7 @@ func (chat *Chat) exchangeKey(payloadBytes [10]byte, address []byte) {
 
 func (chat *Chat) receiveMessage(payloadBytes [10]byte) *Message {
 	payloadMessage := &PayloadMessage{}
-	var payload []byte
-
 	err := binary.Read(bytes.NewReader(payloadBytes[:10]), binary.LittleEndian, payloadMessage)
-	fmt.Print(payload)
 
 	if err != nil {
 		panic(err)
@@ -228,13 +242,13 @@ func main()  {
 	bob := &Partner{Name: "Bob", Address: []byte("127.0.0.1:8782")}
 
 	aliceChat := &Chat{
-		transport: &TCPTransport{
+		transport: &TLSTransport{//TCPTransport{
 			port: "8781",
 		},
 		sessions: []*Session{},
 	}
 	bobChat := &Chat{
-		transport: &TCPTransport{
+		transport: &TLSTransport{
 			port: "8782",
 		},
 		sessions: []*Session{},
@@ -248,56 +262,20 @@ func main()  {
 	}()
 
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 		bobChat.sendMessage(alice, "Hi Alice!")
 		time.Sleep(2 * time.Second)
 		aliceChat.sendMessage(bob, "Hi bob.")
+
+		time.Sleep(2 * time.Second)
+		bobChat.sendMessage(alice, "Hi Alice!22")
+		time.Sleep(2 * time.Second)
+		aliceChat.sendMessage(bob, "Hi bob.22")
 	}()
 
 	aliceMessages := aliceChat.readyReceiveMessage()
+
 	for message := range aliceMessages {
 		fmt.Printf("Message fro Alice -> %s: %s\n", message.from.Name, message.text)
 	}
-}
-
-
-
-// https://astaxie.gitbooks.io/build-web-application-with-golang/en/09.6.html
-func encrypt(plaintext []byte, key []byte) ([]byte, error) {
-	c, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-
-	gcm, err := cipher.NewGCM(c)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
-	}
-
-	return gcm.Seal(nonce, nonce, plaintext, nil), nil
-}
-
-func decrypt(ciphertext []byte, key []byte) ([]byte, error) {
-	c, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-
-	gcm, err := cipher.NewGCM(c)
-	if err != nil {
-		return nil, err
-	}
-
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, errors.New("ciphertext too short")
-	}
-
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	return gcm.Open(nil, nonce, ciphertext, nil)
 }

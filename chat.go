@@ -16,15 +16,17 @@ type Partner struct {
 }
 
 type Message struct {
-	text string
+	PayloadMessage *PayloadMessage
 	from *Partner
+	text string
 }
 
 type Session struct {
 	partner *Partner
 
 	dh *DiffieHellman // TODO remove
-	publickey [2]byte // TODO remove
+	publickey []byte // TODO remove
+	secret []byte // TODO remove
 	// meta *[]byte
 }
 
@@ -54,20 +56,41 @@ func (chat *Chat) sendMessage(partner *Partner, text string)  {
 
 	if currentSession == nil {
 		currentSession = &Session{partner: partner}
-		chat.openSession(currentSession)
-		time.Sleep(3 * time.Second) // TODO
+
+		go func() {
+			chat.openSession(currentSession)
+		}()
+
+		for {
+			if currentSession.publickey != nil {
+				break
+			}
+			//fmt.Printf("%v\n", currentSession)
+			if len(chat.sessions) == 1 {
+				fmt.Println(chat.sessions[0])
+				fmt.Println(chat.sessions[0].publickey)
+			}
+			time.Sleep(3 * time.Second) // TODO
+		}
 	}
 
 	plaintext := []byte(text)
 	payloadMessage := PayloadMessage{}
 
 	h := sha256.New()
-	h.Write(currentSession.dh.privateKey.Bytes())
 
+	if currentSession.secret == nil {
+		z := new(big.Int)
+		z.SetBytes(currentSession.publickey)
+		fmt.Println("1", currentSession.publickey)
+		currentSession.secret = currentSession.dh.generateSecret(z).Bytes()
+	}
+
+	h.Write(currentSession.secret)
 	encryptedMessage, _ := encrypt(plaintext, h.Sum(nil))
-	//copy(payloadMessage.Plaintext[:10], plaintext[:10])
-	copy(payloadMessage.Plaintext[:10], encryptedMessage[:10])
-	//copy(payloadMessage.Plaintext[:10], encryptedMessage[:10])
+
+	copy(payloadMessage.Plaintext[:40], encryptedMessage)
+	payloadMessage.Size = int8(len(encryptedMessage))
 
 	payload := new(bytes.Buffer)
 	err := binary.Write(payload, binary.LittleEndian, payloadMessage)
@@ -75,10 +98,15 @@ func (chat *Chat) sendMessage(partner *Partner, text string)  {
 		panic(err)
 	}
 
-	payloadBytes := payload.Bytes()
+	// decrypted, _ := decrypt(payloadMessage.Plaintext[:37], h.Sum(nil))
+
+	//fmt.Println(encryptedMessage)
+	// fmt.Println(binary.Size(encryptedMessage))
+	//fmt.Println("payloadMessage.Plaintext: ", payloadMessage.Plaintext)
+
 
 	packet := Packet{MsgType: MsgTypeMessage, Version: CurrentVersion}
-	copy(packet.Payload[:10], payloadBytes)
+	copy(packet.Payload[:48], payload.Bytes())
 
 	chat.transport.sendPacket(partner.Address, packet)
 }
@@ -97,14 +125,23 @@ func (chat *Chat) readyReceiveMessage() chan *Message {
 				continue
 			}
 
+			currentSession := chat.sessions[0]
+
+			if currentSession.secret == nil {
+				z := new(big.Int)
+				z.SetBytes(currentSession.publickey)
+				currentSession.secret = currentSession.dh.generateSecret(z).Bytes()
+			}
+
 			h := sha256.New()
-			h.Write(chat.sessions[0].dh.privateKey.Bytes())
-			fmt.Println(message)
-			decrypted, e := decrypt([]byte(message.text), h.Sum(nil))
+
+			fmt.Println("2", currentSession.secret)
+			h.Write(currentSession.secret)
+
+			decrypted, e := decrypt([]byte(message.PayloadMessage.Plaintext[:message.PayloadMessage.Size]), h.Sum(nil))
 			if e != nil {
 				panic(e)
 			}
-
 			message.text = string(decrypted)
 
 			if message != nil {
@@ -131,7 +168,8 @@ type PayloadExchange struct {
 }
 
 type PayloadMessage struct {
-	Plaintext [10]byte
+	Plaintext [40]byte
+	Size int8
 	// from
 }
 
@@ -164,7 +202,7 @@ func (chat *Chat) sendKey(session *Session)  {
 		Version: CurrentVersion,
 		MsgType: MsgTypeExchangeKey,
 	}
-	copy(startHandshakePacket.Payload[:], buf.Bytes()[:10])
+	copy(startHandshakePacket.Payload[:], buf.Bytes()[:48])
 	chat.transport.sendPacket(session.partner.Address, startHandshakePacket)
 }
 
@@ -186,22 +224,25 @@ func (chat *Chat) handlePacket(packet *PacketWithAddress) (*Message, error)  {
 }
 
 
-func (chat *Chat) exchangeKey(payloadBytes [10]byte, address []byte) {
+func (chat *Chat) exchangeKey(payloadBytes [48]byte, address []byte) {
 	payloadExchange := &PayloadExchange{}
 
-	err := binary.Read(bytes.NewReader(payloadBytes[:10]), binary.LittleEndian, payloadExchange)
+	err := binary.Read(bytes.NewReader(payloadBytes[:48]), binary.LittleEndian, payloadExchange)
 
 	if err != nil {
 		panic(err)
 	}
 
-	// fmt.Println("%v", len(chat.sessions))
+
+	fmt.Printf("len(chat.sessions) %v\n", len(chat.sessions))
 	if len(chat.sessions) > 0 { // TODO resolve by payload
 		session := chat.sessions[0]
-		session.publickey = payloadExchange.PublicKey
+		session.publickey = payloadExchange.PublicKey[:2]
+		fmt.Println(session)
+		fmt.Printf("Set public key to %v\n", chat.sessions[0])
 	} else {
 		session := &Session{}
-		session.publickey = payloadExchange.PublicKey
+		session.publickey = payloadExchange.PublicKey[:2]
 
 		partner := &Partner{Address: address} // todo find from list by address
 		session.partner = partner
@@ -222,16 +263,16 @@ func (chat *Chat) exchangeKey(payloadBytes [10]byte, address []byte) {
 	}
 }
 
-func (chat *Chat) receiveMessage(payloadBytes [10]byte) *Message {
+func (chat *Chat) receiveMessage(payloadBytes [48]byte) *Message {
 	payloadMessage := &PayloadMessage{}
-	err := binary.Read(bytes.NewReader(payloadBytes[:10]), binary.LittleEndian, payloadMessage)
+	err := binary.Read(bytes.NewReader(payloadBytes[:48]), binary.LittleEndian, payloadMessage)
 
 	if err != nil {
 		panic(err)
 	}
 
 	message := &Message{
-		text: string(payloadMessage.Plaintext[:10]),
+		PayloadMessage: payloadMessage,
 	}
 
 	return message
@@ -254,28 +295,29 @@ func main()  {
 		sessions: []*Session{},
 	}
 
+	bobMessages := bobChat.readyReceiveMessage()
+	aliceMessages := aliceChat.readyReceiveMessage()
+
 	go func() {
-		bobMessages := bobChat.readyReceiveMessage()
+		time.Sleep(2 * time.Second)
+		bobChat.sendMessage(alice, "Hi Alice!")
+		//time.Sleep(2 * time.Second)
+		aliceChat.sendMessage(bob, "Hi bob.")
+
+		//time.Sleep(2 * time.Second)
+		bobChat.sendMessage(alice, "Hi Alice!22")
+		// time.Sleep(2 * time.Second)
+		aliceChat.sendMessage(bob, "Hi bob.22")
+	}()
+
+
+	go func() {
 		for message := range bobMessages {
 			fmt.Printf("Message for Bob -> %s: %s\n", message.from.Name, message.text)
 		}
 	}()
 
-	go func() {
-		time.Sleep(2 * time.Second)
-		bobChat.sendMessage(alice, "Hi Alice!")
-		time.Sleep(2 * time.Second)
-		aliceChat.sendMessage(bob, "Hi bob.")
-
-		time.Sleep(2 * time.Second)
-		bobChat.sendMessage(alice, "Hi Alice!22")
-		time.Sleep(2 * time.Second)
-		aliceChat.sendMessage(bob, "Hi bob.22")
-	}()
-
-	aliceMessages := aliceChat.readyReceiveMessage()
-
 	for message := range aliceMessages {
-		fmt.Printf("Message fro Alice -> %s: %s\n", message.from.Name, message.text)
+		fmt.Printf("Message for Alice -> %s: %s\n", message.from.Name, message.text)
 	}
 }

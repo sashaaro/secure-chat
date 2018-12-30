@@ -11,7 +11,7 @@ import (
 type Packet struct {
 	Version byte
 	MsgType byte
-	Payload [10]byte
+	Payload [48]byte
 }
 
 type PacketWithAddress struct {
@@ -113,7 +113,7 @@ func (transport *TLSTransport) sendPacket(address []byte, packet Packet)  {
 
 func (transport *TLSTransport) receivePacket() chan *PacketWithAddress {
 	if transport.listener == nil {
-		cer, err := tls.LoadX509KeyPair("test.cert", "test.key")
+		cer, err := tls.LoadX509KeyPair("cert.pem", "key.pem")
 		if err != nil {
 			panic(err)
 		}

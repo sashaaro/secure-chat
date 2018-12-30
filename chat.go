@@ -58,6 +58,7 @@ func (chat *Chat) sendMessage(partner *Partner, text string)  {
 		currentSession = &Session{partner: partner}
 
 		go func() {
+			fmt.Printf("Open:\n%p\n", currentSession)
 			chat.openSession(currentSession)
 		}()
 
@@ -67,10 +68,9 @@ func (chat *Chat) sendMessage(partner *Partner, text string)  {
 			}
 			//fmt.Printf("%v\n", currentSession)
 			if len(chat.sessions) == 1 {
-				fmt.Println(chat.sessions[0])
-				fmt.Println(chat.sessions[0].publickey)
+				fmt.Printf("Wait:\n%p\n", chat.sessions[0])
 			}
-			time.Sleep(3 * time.Second) // TODO
+			time.Sleep(5 * time.Second) // TODO
 		}
 	}
 
@@ -179,8 +179,12 @@ func (chat *Chat) openSession(session *Session)  {
 	dh.generatePrivateKey(16)
 	dh.generatePublic()
 
+	fmt.Printf("Open session for \n%p\n", session)
+
 	chat.sessions = append(chat.sessions, session)
 	session.dh = dh
+
+	fmt.Printf("Opened session for \n%p\n", chat.sessions[0])
 
 	chat.sendKey(session)
 }
@@ -203,6 +207,8 @@ func (chat *Chat) sendKey(session *Session)  {
 		MsgType: MsgTypeExchangeKey,
 	}
 	copy(startHandshakePacket.Payload[:], buf.Bytes()[:48])
+
+	fmt.Printf("Send PayloadExchange to \n%p\n", string(session.partner.Address))
 	chat.transport.sendPacket(session.partner.Address, startHandshakePacket)
 }
 
@@ -213,6 +219,7 @@ func (chat *Chat) handlePacket(packet *PacketWithAddress) (*Message, error)  {
 
 	switch packet.MsgType {
 	case MsgTypeExchangeKey:
+		fmt.Printf("Recieve MsgTypeExchangeKey from \n%p\n", string(packet.address))
 		chat.exchangeKey(packet.Payload, packet.address)
 	case MsgTypeMessage:
 		message := chat.receiveMessage(packet.Payload)
@@ -238,8 +245,7 @@ func (chat *Chat) exchangeKey(payloadBytes [48]byte, address []byte) {
 	if len(chat.sessions) > 0 { // TODO resolve by payload
 		session := chat.sessions[0]
 		session.publickey = payloadExchange.PublicKey[:2]
-		fmt.Println(session)
-		fmt.Printf("Set public key to %v\n", chat.sessions[0])
+		fmt.Printf("Set public key to\n%p\n", chat.sessions[0])
 	} else {
 		session := &Session{}
 		session.publickey = payloadExchange.PublicKey[:2]
@@ -260,6 +266,8 @@ func (chat *Chat) exchangeKey(payloadBytes [48]byte, address []byte) {
 
 		chat.sessions = append(chat.sessions, session)
 		chat.sendKey(session)
+
+		fmt.Printf("Init sesstion from external \n%p\n", session)
 	}
 }
 
@@ -301,7 +309,7 @@ func main()  {
 	go func() {
 		time.Sleep(2 * time.Second)
 		bobChat.sendMessage(alice, "Hi Alice!")
-		//time.Sleep(2 * time.Second)
+		time.Sleep(2 * time.Second)
 		aliceChat.sendMessage(bob, "Hi bob.")
 
 		//time.Sleep(2 * time.Second)

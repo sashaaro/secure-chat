@@ -129,23 +129,32 @@ func (transport *TLSTransport) receivePacket() chan *PacketWithAddress {
 				panic(err)
 			}
 
-			packet := &Packet{}
-
-			err2 := binary.Read(conn, binary.LittleEndian, packet)
-			if err2 == io.EOF {
-				continue
-			}
-			if err2 != nil {
-				panic(err)
-			}
-
-			packetWithAddress := &PacketWithAddress{}
-			packetWithAddress.Packet = *packet
-			packetWithAddress.address = []byte(conn.LocalAddr().String())
-
-			channel <- packetWithAddress
+			go func() {
+				packet  := transport.handleConn(conn)
+				if packet != nil {
+					channel <- packet
+				}
+			}()
 		}
 	}()
 
 	return channel
+}
+
+func (transport *TLSTransport) handleConn(conn net.Conn) *PacketWithAddress {
+	packet := &Packet{}
+
+	err2 := binary.Read(conn, binary.LittleEndian, packet)
+	if err2 == io.EOF {
+		return nil
+	}
+	if err2 != nil {
+		panic(err2)
+	}
+
+	packetWithAddress := &PacketWithAddress{}
+	packetWithAddress.Packet = *packet
+	packetWithAddress.address = []byte(conn.LocalAddr().String())
+
+	return packetWithAddress
 }
